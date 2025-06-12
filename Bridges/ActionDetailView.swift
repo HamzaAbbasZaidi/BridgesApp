@@ -14,6 +14,20 @@ struct ActionDetailView: View {
     @State private var showImagePicker = false
     @State private var navigateToLeaderboard = false
     @State private var issueTitle: String = "Action"
+    @State private var chatPrompt: String = ""
+    
+    let promptOptions = [
+        "What's your favorite celebrity and why?",
+        "If you could visit any country right now, where would you go?",
+        "What's the weirdest food you've ever tried?",
+        "If you had a superpower for one day, what would it be?",
+        "What's a movie you could watch a hundred times?",
+        "Which song always puts you in a good mood?",
+        "What's something small that always makes you smile?",
+        "If you were an animal, what would you be?",
+        "What’s the best gift you’ve ever received?",
+        "What's something people always misunderstand about you?"
+    ]
 
     let uid = Auth.auth().currentUser?.uid
 
@@ -82,6 +96,17 @@ struct ActionDetailView: View {
                     .font(.footnote)
                     .foregroundColor(.blue)
             }
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Conversation Starter")
+                    .font(.headline)
+                Text(chatPrompt)
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top)
+
 
             Spacer()
 
@@ -100,6 +125,11 @@ struct ActionDetailView: View {
         .navigationTitle(issueTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            
+            let dayIndex = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0
+            chatPrompt = promptOptions[dayIndex % promptOptions.count]
+
+            
             if let uid = uid {
                 hasConfirmed = action.confirmedBy?.contains(uid) ?? false
                 isComplete = action.status == "completed"
