@@ -132,8 +132,23 @@ struct ActionDetailView: View {
             
             if let uid = uid {
                 hasConfirmed = action.confirmedBy?.contains(uid) ?? false
-                isComplete = action.status == "completed"
             }
+
+            if let category = action.category?.lowercased(), let issueId = action.issueId, let actionId = action.id {
+                let db = Firestore.firestore()
+                let actionRef = db.collection("categories").document(category)
+                    .collection("issues").document(issueId)
+                    .collection("action").document(actionId)
+
+                actionRef.getDocument { snapshot, _ in
+                    if let data = snapshot?.data(),
+                       let status = data["status"] as? String,
+                       status == "completed" {
+                        isComplete = true
+                    }
+                }
+            }
+
             
             
             if let category = action.category?.lowercased(), let issueId = action.issueId {
@@ -190,19 +205,21 @@ struct ActionDetailView: View {
                     }
 
                     let notConfirmed = participants.filter { !confirmedBy.contains($0) }
+                    let validConfirmed = confirmedBy.filter { participants.contains($0) }
 
-                    if notConfirmed.isEmpty {
+                    if validConfirmed.count == participants.count {
                         transaction.updateData([
                             "status": "completed"
                         ], forDocument: actionRef)
 
-                        for uid in participants {
+                        for uid in validConfirmed {
                             let userRef = db.collection("users").document(uid)
                             transaction.updateData([
                                 "points": FieldValue.increment(Int64(points))
                             ], forDocument: userRef)
                         }
                     }
+
 
                     return nil
                 }) { _, error in
