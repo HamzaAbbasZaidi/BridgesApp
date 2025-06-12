@@ -10,7 +10,7 @@ struct MainTopicsView: View {
     @State private var selectedIssue: Issue? = nil
     @State private var showInterestEditor = false
     @State private var showCreateIssue = false
-
+    @State private var userPoints: Int = 0
 
     init() {
             print("MainTopicsView INIT")
@@ -30,6 +30,10 @@ struct MainTopicsView: View {
                         .foregroundColor(.blue)
                         .padding(.top)
 
+                    Text("You have \(userPoints) points")
+                                            .font(.subheadline)
+                                            .foregroundColor(.blue)
+                    
                     Text("Tap on a topic below to dive into trending conversations. Earn points by engaging positively!")
                         .font(.subheadline)
                         .multilineTextAlignment(.center)
@@ -124,6 +128,7 @@ struct MainTopicsView: View {
             }
             .onAppear {
                 print("MainTopicsView appeared with \(issues.count) issues")
+                fetchUserPoints()
                 loadTopics(for: selectedFilter)
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("refreshTopics"))) { _ in
@@ -152,7 +157,6 @@ struct MainTopicsView: View {
                     return
                 }
 
-                // Fetch from all categories
                 let categories = ["region", "sport"] // add others if needed
                 var allIssues: [Issue] = []
                 let group = DispatchGroup()
@@ -211,6 +215,16 @@ struct MainTopicsView: View {
                 }
         }
     }
+    
+    func fetchUserPoints() {
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            let db = Firestore.firestore()
+            db.collection("users").document(uid).getDocument { snapshot, _ in
+                if let data = snapshot?.data(), let points = data["points"] as? Int {
+                    self.userPoints = points
+                }
+            }
+        }
     
     func addIssueToSelectedIfNeeded(_ issue: Issue) {
             guard let uid = Auth.auth().currentUser?.uid else { return }
