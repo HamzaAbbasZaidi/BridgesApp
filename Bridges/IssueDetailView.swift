@@ -10,12 +10,12 @@ struct IssueDetailView: View {
     @State private var joinedActions: [SuggestedAction] = []
     @State private var userComfortLevel: Int = 1
     @State private var showActsOfKindness = false
-
+    
     
     var uid: String? {
         Auth.auth().currentUser?.uid
     }
-
+    
     
     var body: some View {
         ScrollView {
@@ -54,7 +54,7 @@ struct IssueDetailView: View {
                 .background(Color.blue.opacity(0.8))
                 .foregroundColor(.white)
                 .cornerRadius(10)
-
+                
                 
                 Divider()
                 
@@ -140,7 +140,7 @@ struct IssueDetailView: View {
                                     Text("\(action.points ?? 0) points")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
-
+                                    
                                     Text("\(action.participants.count) participant(s)")
                                         .font(.caption)
                                         .foregroundColor(.gray)
@@ -150,7 +150,7 @@ struct IssueDetailView: View {
                                 .cornerRadius(10)
                             }
                         }
-
+                        
                     }
                 }
                 .padding(.horizontal)
@@ -162,7 +162,7 @@ struct IssueDetailView: View {
         .navigationDestination(isPresented: $showActsOfKindness) {
             ActsOfKindnessView(issue: issue)
         }
-
+        
         .onAppear {
             fetchComfortLevel()
         }
@@ -190,33 +190,33 @@ struct IssueDetailView: View {
         let actionRef = db.collection("categories").document(category)
             .collection("issues").document(issue.id)
             .collection("action")
-
+        
         let rejectedRef = db.collection("users").document(uid)
             .collection("rejectedActions")
-
+        
         // Step 1: Fetch rejected actions first
         rejectedRef.getDocuments { rejectionSnapshot, _ in
             let rejectedIds: Set<String> = Set(rejectionSnapshot?.documents.map { $0.documentID } ?? [])
-
+            
             // Step 2: Now fetch all available actions
             actionRef.getDocuments { snapshot, error in
                 guard let docs = snapshot?.documents else { return }
-
+                
                 let allActions = docs.compactMap { try? $0.data(as: SuggestedAction.self) }
                 self.joinedActions = allActions.filter { $0.participants.contains(uid) }
-
+                
                 // Step 3: Remove joined and rejected actions
                 let unjoinedActions = allActions.filter {
                     !($0.participants.contains(uid)) &&
                     !(rejectedIds.contains($0.id ?? ""))
                 }
-
+                
                 let comfortMatches = unjoinedActions.filter {
                     ($0.difficulty ?? 1) <= userComfortLevel
                 }
-
+                
                 var final = comfortMatches
-
+                
                 // Step 4: Add slightly harder actions if needed
                 if final.count < 3 {
                     let harderMatches = unjoinedActions.filter {
@@ -225,143 +225,156 @@ struct IssueDetailView: View {
                     }
                     final.append(contentsOf: harderMatches.prefix(3 - final.count))
                 }
-
+                
                 self.suggestedActions = Array(final.prefix(3))
-
+                
                 if self.suggestedActions.count < 3 {
                     generateActionsWithGeminiIfNeeded(currentCount: self.suggestedActions.count)
                 }
             }
         }
     }
-
+    
     
     func generateActionsWithGeminiIfNeeded(currentCount: Int) {
         guard let category = issue.category?.lowercased(), let uid else { return }
         let needed = 3 - currentCount
         let db = Firestore.firestore()
-
+        
         let userDoc = db.collection("users").document(uid)
-
-        userDoc.collection("acceptedActions").whereField("issueId", isEqualTo: issue.id).getDocuments { acceptedSnap, _ in
-            userDoc.collection("rejectedActions").whereField("issueId", isEqualTo: issue.id).getDocuments { rejectedSnap, _ in
-
-                let accepted = acceptedSnap?.documents.compactMap { $0.data()["text"] as? String } ?? []
-                let rejected = rejectedSnap?.documents.compactMap { $0.data()["text"] as? String } ?? []
-
-                let prompt = """
+        
+        userDoc.getDocument { userSnapshot, _ in
+            guard let userData = userSnapshot?.data(),
+                  let profile = userData["profile"] as? [String: Any],
+                  let activityLevel = profile["activityLevel"] as? Int,
+                  let ageGroup = profile["ageGroup"] as? String else {
+                print("❌ Failed to get profile info")
+                return
+            }
+            
+            userDoc.collection("acceptedActions").whereField("issueId", isEqualTo: issue.id).getDocuments { acceptedSnap, _ in
+                userDoc.collection("rejectedActions").whereField("issueId", isEqualTo: issue.id).getDocuments { rejectedSnap, _ in
+                    
+                    let accepted = acceptedSnap?.documents.compactMap { $0.data()["text"] as? String } ?? []
+                    let rejected = rejectedSnap?.documents.compactMap { $0.data()["text"] as? String } ?? []
+                    
+                    let prompt = """
                 Suggest \(needed) short, specific collaborative actions that strangers can do together directly related to the issue titled "\(issue.title)". These strangers are potentially on different sides of the issue. This action should involve them physically getting together and doing something tangible. However, it should not directly involve discussing the issue at hand.
-
+                
                 The user has a comfort level of \(userComfortLevel) out of 5.
-
+                Their activity level is \(activityLevel) out of 5.
+                They are in the "\(ageGroup)" age group.
+                
                 Return your response in *exactly* the following format for each action:
-
+                
                 Action: [short description]
                 Points: [10–100, based on effort, empathy, or impact]
                 Participants: [minimum number of people required]
-
+                
                 Do not include any commentary, markdown, or explanations. Only list the actions in the format above.
-
+                
                 Actions the user has already accepted:
                 \(accepted.map { "- \($0)" }.joined(separator: "\n"))
-
+                
                 Actions the user has rejected:
                 \(rejected.map { "- \($0)" }.joined(separator: "\n"))
                 """
-
-                let apiKey = "AIzaSyAuBhbG37VharRwRA3VM2rKrPvDnuEl5sM"
-                guard let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=\(apiKey)") else {
-                    print("❌ Invalid Gemini URL")
-                    return
-                }
-
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-                let body: [String: Any] = [
-                    "contents": [["parts": [["text": prompt]]]]
-                ]
-
-                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-                URLSession.shared.dataTask(with: request) { data, _, error in
-                    guard let data = data, error == nil else {
-                        print("❌ Gemini API request failed: \(error?.localizedDescription ?? "Unknown error")")
+                    
+                    let apiKey = "AIzaSyAuBhbG37VharRwRA3VM2rKrPvDnuEl5sM"
+                    guard let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=\(apiKey)") else {
+                        print("❌ Invalid Gemini URL")
                         return
                     }
-
-                    do {
-                        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                        print("🔍 Raw Gemini response:\n\(json ?? [:])")
-                        if let candidates = json?["candidates"] as? [[String: Any]],
-                           let content = candidates.first?["content"] as? [String: Any],
-                           let parts = content["parts"] as? [[String: Any]],
-                           let text = parts.first?["text"] as? String {
-
-                            let lines = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                            var parsedSuggestions: [(text: String, points: Int, threshold: Int)] = []
-
-                            var currentText: String?
-                            var currentPoints: Int?
-                            var currentThreshold: Int?
-
-                            for line in lines {
-                                if line.lowercased().starts(with: "action:") {
-                                    currentText = line.replacingOccurrences(of: "Action:", with: "").trimmingCharacters(in: .whitespaces)
-                                } else if line.lowercased().starts(with: "points:") {
-                                    currentPoints = Int(line.replacingOccurrences(of: "Points:", with: "").trimmingCharacters(in: .whitespaces))
-                                } else if line.lowercased().starts(with: "participants:") {
-                                    currentThreshold = Int(line.replacingOccurrences(of: "Participants:", with: "").trimmingCharacters(in: .whitespaces))
-                                }
-
-                                if let text = currentText, let points = currentPoints, let threshold = currentThreshold {
-                                    parsedSuggestions.append((text, points, threshold))
-                                    currentText = nil
-                                    currentPoints = nil
-                                    currentThreshold = nil
-                                }
-                            }
-
-                            DispatchQueue.main.async {
-                                for (text, points, threshold) in parsedSuggestions.prefix(needed) {
-                                    let newAction = SuggestedAction(
-                                        id: UUID().uuidString,
-                                        text: text,
-                                        createdBy: "gemini",
-                                        difficulty: self.userComfortLevel,
-                                        threshold: threshold,
-                                        participants: [],
-                                        category: self.issue.category,
-                                        issueId: self.issue.id,
-                                        points: points
-                                    )
-
-                                    self.suggestedActions.append(newAction)
-
-                                    let docRef = db.collection("categories").document(category)
-                                        .collection("issues").document(issue.id)
-                                        .collection("action").document(newAction.id!)
-
-                                    do {
-                                        try docRef.setData(from: newAction)
-                                    } catch {
-                                        print("❌ Failed to save action: \(error.localizedDescription)")
+                    
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    
+                    let body: [String: Any] = [
+                        "contents": [["parts": [["text": prompt]]]]
+                    ]
+                    
+                    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                    
+                    URLSession.shared.dataTask(with: request) { data, _, error in
+                        guard let data = data, error == nil else {
+                            print("❌ Gemini API request failed: \(error?.localizedDescription ?? "Unknown error")")
+                            return
+                        }
+                        
+                        do {
+                            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                            print("🔍 Raw Gemini response:\n\(json ?? [:])")
+                            if let candidates = json?["candidates"] as? [[String: Any]],
+                               let content = candidates.first?["content"] as? [String: Any],
+                               let parts = content["parts"] as? [[String: Any]],
+                               let text = parts.first?["text"] as? String {
+                                
+                                let lines = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                                var parsedSuggestions: [(text: String, points: Int, threshold: Int)] = []
+                                
+                                var currentText: String?
+                                var currentPoints: Int?
+                                var currentThreshold: Int?
+                                
+                                for line in lines {
+                                    if line.lowercased().starts(with: "action:") {
+                                        currentText = line.replacingOccurrences(of: "Action:", with: "").trimmingCharacters(in: .whitespaces)
+                                    } else if line.lowercased().starts(with: "points:") {
+                                        currentPoints = Int(line.replacingOccurrences(of: "Points:", with: "").trimmingCharacters(in: .whitespaces))
+                                    } else if line.lowercased().starts(with: "participants:") {
+                                        currentThreshold = Int(line.replacingOccurrences(of: "Participants:", with: "").trimmingCharacters(in: .whitespaces))
+                                    }
+                                    
+                                    if let text = currentText, let points = currentPoints, let threshold = currentThreshold {
+                                        parsedSuggestions.append((text, points, threshold))
+                                        currentText = nil
+                                        currentPoints = nil
+                                        currentThreshold = nil
                                     }
                                 }
+                                
+                                DispatchQueue.main.async {
+                                    for (text, points, threshold) in parsedSuggestions.prefix(needed) {
+                                        let newAction = SuggestedAction(
+                                            id: UUID().uuidString,
+                                            text: text,
+                                            createdBy: "gemini",
+                                            difficulty: self.userComfortLevel,
+                                            threshold: threshold,
+                                            participants: [],
+                                            category: self.issue.category,
+                                            issueId: self.issue.id,
+                                            points: points
+                                        )
+                                        
+                                        self.suggestedActions.append(newAction)
+                                        
+                                        let docRef = db.collection("categories").document(category)
+                                            .collection("issues").document(issue.id)
+                                            .collection("action").document(newAction.id!)
+                                        
+                                        do {
+                                            try docRef.setData(from: newAction)
+                                        } catch {
+                                            print("❌ Failed to save action: \(error.localizedDescription)")
+                                        }
+                                    }
+                                }
+                                
+                            } else {
+                                print("❌ Unexpected Gemini response format")
                             }
-
-                        } else {
-                            print("❌ Unexpected Gemini response format")
+                        } catch {
+                            print("❌ Gemini JSON parsing error: \(error)")
                         }
-                    } catch {
-                        print("❌ Gemini JSON parsing error: \(error)")
-                    }
-
-                }.resume()
+                        
+                    }.resume()
+                }
             }
         }
     }
+
 
 
 
