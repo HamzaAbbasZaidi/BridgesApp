@@ -209,14 +209,29 @@ struct ActsOfKindnessView: View {
 
     func generateSuggestion() {
         loading = true
+
+        let suggestions = [
+                "Give a compliment and buy a small treat for the other person.",
+                "Write a short, kind note and leave it somewhere for them to find.",
+                "Offer to carry something heavy or help with a small chore.",
+                "Draw something meaningful for the other person.",
+                "Prepare a surprise snack or drink they might enjoy.",
+                "Tell them something you genuinely admire about them.",
+                "Offer to listen without interrupting for 5 minutes.",
+                "Give them a small handmade item (origami, bracelet, etc.).",
+                "Find a photo of a shared memory and write a message about it.",
+                "Teach them something useful in less than 2 minutes."
+            ]
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            let suggestion = "Give a compliment and buy a small treat for the other person."
+            let suggestion = suggestions.randomElement() ?? "Do something thoughtful and unexpected."
             self.proposedAction = suggestion
             self.loading = false
 
             pairDocRef?.updateData(["suggestedAction": suggestion])
         }
     }
+
 
     func allocatePoints() {
         let db = Firestore.firestore()
